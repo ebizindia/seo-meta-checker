@@ -134,7 +134,7 @@ class SEOCrawler {
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_TIMEOUT => $this->timeout,
-                CURLOPT_USERAGENT => 'Ebizindia SEO Crawler 2.0 (Optimized)',
+                CURLOPT_USERAGENT => ' SEO Crawler 2.0 (Optimized)',
                 CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_MAXREDIRS => 3,
                 CURLOPT_CONNECTTIMEOUT => 5,
@@ -181,7 +181,7 @@ class SEOCrawler {
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => $this->timeout,
-            CURLOPT_USERAGENT => 'Ebizindia SEO Crawler 1.0',
+            CURLOPT_USERAGENT => ' SEO Crawler 1.0',
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_MAXREDIRS => 3,
         ]);
@@ -566,7 +566,7 @@ if (isset($_GET['analyze']) && $_GET['analyze'] === '1' && !empty($_GET['domain'
             $emailBody = generateEmailReport($results, $domain, $totalCrawled, $executionTime, $performanceStats);
             $headers = "MIME-Version: 1.0\r\n";
             $headers .= "Content-type: text/html; charset=UTF-8\r\n";
-            $headers .= "From: SEO Meta Tool <arun@ebizindia.com>\r\n";
+            $headers .= "From: SEO Meta Tool <YOUR-EMAIL@example.com>\r\n";
             $headers .= "Reply-To: YOUR-EMAIL@example.com\r\n";
             $headers .= "X-Mailer: PHP/" . phpversion() . "\r\n";
             
@@ -669,7 +669,6 @@ function generateEmailReport($results, $domain, $totalCrawled, $executionTime, $
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SEO Meta Checker Tool - Ebizindia</title>
     <meta name="description" content="Comprehensive SEO audit tool. Check your website for missing title tags, meta descriptions, canonical URLs, H1 headings, viewport, charset and language attributes. Free tool by Ebizindia.">
-    <link rel="canonical" href="https://www.ebizindia.com/tools/sitemeta/">
     
     <!-- Bootstrap 4 CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
@@ -1055,4 +1054,5 @@ function generateEmailReport($results, $domain, $totalCrawled, $executionTime, $
         }
     </script>
 </body>
+
 </html>
