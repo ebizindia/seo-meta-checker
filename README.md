@@ -49,7 +49,7 @@ A high-performance PHP-based web crawler that analyzes websites for SEO issues. 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/seo-meta-checker.git
+git clone https://github.com/ebizindia/seo-meta-checker.git
 cd seo-meta-checker
 ```
 
