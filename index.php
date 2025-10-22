@@ -2,12 +2,115 @@
 // SEO Meta Checker Tool
 // Powered by Ebizindia - https://www.ebizindia.com
 
+// Security Headers
+header("X-Frame-Options: DENY");
+header("X-Content-Type-Options: nosniff");
+header("X-XSS-Protection: 1; mode=block");
+header("Referrer-Policy: strict-origin-when-cross-origin");
+header("Content-Security-Policy: default-src 'self' https://cdn.jsdelivr.net https://code.jquery.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://code.jquery.com https://cdn.jsdelivr.net; img-src 'self' data: https:;");
+
 // Increase PHP execution time limits
 ini_set('max_execution_time', 600); // 10 minutes
 set_time_limit(600); // 10 minutes - alternative method
 ini_set('memory_limit', '256M'); // Increase memory limit too
 
+// Secure session configuration
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 1 : 0);
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.use_strict_mode', 1);
+
 session_start();
+
+// Generate CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Rate limiting - simple implementation
+if (!isset($_SESSION['last_crawl_time'])) {
+    $_SESSION['last_crawl_time'] = 0;
+}
+
+function checkRateLimit() {
+    $minInterval = 10; // Minimum 10 seconds between crawls
+    $timeSinceLastCrawl = time() - $_SESSION['last_crawl_time'];
+
+    if ($timeSinceLastCrawl < $minInterval) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Validate and sanitize URL to prevent SSRF attacks
+ * @param string $url The URL to validate
+ * @return array Returns ['valid' => bool, 'url' => string|null, 'error' => string|null]
+ */
+function validateUrl($url) {
+    // Remove whitespace
+    $url = trim($url);
+
+    // Add https:// if no protocol
+    if (!preg_match('/^https?:\/\//i', $url)) {
+        $url = 'https://' . $url;
+    }
+
+    // Parse URL
+    $parsed = parse_url($url);
+
+    if (!$parsed || !isset($parsed['host'])) {
+        return ['valid' => false, 'url' => null, 'error' => 'Invalid URL format'];
+    }
+
+    $host = $parsed['host'];
+
+    // Prevent localhost and internal network access
+    $blocked_patterns = [
+        '/^localhost$/i',
+        '/^127\./i',
+        '/^10\./i',
+        '/^172\.(1[6-9]|2[0-9]|3[0-1])\./i',
+        '/^192\.168\./i',
+        '/^169\.254\./i',  // Link-local addresses
+        '/^0\./i',
+        '/^::1$/i',  // IPv6 localhost
+        '/^fe80:/i', // IPv6 link-local
+        '/^fc00:/i', // IPv6 unique local
+        '/^ff00:/i', // IPv6 multicast
+    ];
+
+    foreach ($blocked_patterns as $pattern) {
+        if (preg_match($pattern, $host)) {
+            return ['valid' => false, 'url' => null, 'error' => 'Access to internal/private networks is not allowed'];
+        }
+    }
+
+    // Additional validation: Check if domain resolves to internal IP
+    $ip = gethostbyname($host);
+    if ($ip && $ip !== $host) {
+        // Check if resolved IP is private
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return ['valid' => false, 'url' => null, 'error' => 'Domain resolves to a private IP address'];
+        }
+    }
+
+    // Validate the scheme
+    if (!isset($parsed['scheme']) || !in_array(strtolower($parsed['scheme']), ['http', 'https'])) {
+        return ['valid' => false, 'url' => null, 'error' => 'Only HTTP and HTTPS protocols are allowed'];
+    }
+
+    // Validate host format
+    if (!filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+        // Try validating as IP
+        if (!filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return ['valid' => false, 'url' => null, 'error' => 'Invalid domain or IP address'];
+        }
+    }
+
+    return ['valid' => true, 'url' => $url, 'error' => null];
+}
 
 class SEOCrawler {
     private $visited = []; // Hash map for O(1) lookups
@@ -134,8 +237,9 @@ class SEOCrawler {
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_TIMEOUT => $this->timeout,
-                CURLOPT_USERAGENT => ' SEO Crawler 2.0 (Optimized)',
-                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_USERAGENT => 'SEO Crawler 2.0 (Optimized)',
+                CURLOPT_SSL_VERIFYPEER => true,  // Enable SSL verification for security
+                CURLOPT_SSL_VERIFYHOST => 2,     // Verify SSL host
                 CURLOPT_MAXREDIRS => 3,
                 CURLOPT_CONNECTTIMEOUT => 5,
             ]);
@@ -181,8 +285,9 @@ class SEOCrawler {
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => $this->timeout,
-            CURLOPT_USERAGENT => ' SEO Crawler 1.0',
-            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_USERAGENT => 'SEO Crawler 1.0',
+            CURLOPT_SSL_VERIFYPEER => true,  // Enable SSL verification for security
+            CURLOPT_SSL_VERIFYHOST => 2,     // Verify SSL host
             CURLOPT_MAXREDIRS => 3,
         ]);
         
@@ -508,35 +613,61 @@ class SEOCrawler {
 $results = [];
 $crawled = false;
 $emailSent = false;
+$errorMessage = '';
 
-if ($_POST['action'] === 'crawl' && !empty($_POST['domain'])) {
-    $domain = filter_var(trim($_POST['domain']), FILTER_SANITIZE_URL);
-    $sendEmail = isset($_POST['send_email']);
-    
-    // Check for limit parameter
-    $limit = 500; // default
-    if (isset($_GET['limit']) && is_numeric($_GET['limit'])) {
-        $limit = max(1, min(1000, intval($_GET['limit']))); // Between 1 and 1000
+if (isset($_POST['action']) && $_POST['action'] === 'crawl' && !empty($_POST['domain'])) {
+    // CSRF token validation
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die('CSRF token validation failed. Please refresh the page and try again.');
     }
-    
-    if ($domain) {
-        // Redirect after POST to prevent resubmission on refresh
-        $redirectUrl = $_SERVER['PHP_SELF'] . '?analyze=1&domain=' . urlencode($domain) . '&limit=' . $limit;
-        if ($sendEmail) $redirectUrl .= '&email=1';
-        if (isset($_GET['limit'])) $redirectUrl .= '&limit=' . $limit;
-        
-        header('Location: ' . $redirectUrl);
-        exit;
+
+    // Rate limiting check
+    if (!checkRateLimit()) {
+        $errorMessage = 'Please wait at least 10 seconds between crawl requests.';
+    } else {
+        $domain = trim($_POST['domain']);
+
+        // Validate URL using new validation function
+        $validation = validateUrl($domain);
+
+        if (!$validation['valid']) {
+            $errorMessage = 'Invalid domain: ' . htmlspecialchars($validation['error']);
+        } else {
+            $domain = $validation['url'];
+            $sendEmail = isset($_POST['send_email']);
+
+            // Check for limit parameter
+            $limit = 500; // default
+            if (isset($_GET['limit']) && is_numeric($_GET['limit'])) {
+                $limit = max(1, min(1000, intval($_GET['limit']))); // Between 1 and 1000
+            }
+
+            // Update last crawl time
+            $_SESSION['last_crawl_time'] = time();
+
+            // Redirect after POST to prevent resubmission on refresh
+            $redirectUrl = $_SERVER['PHP_SELF'] . '?analyze=1&domain=' . urlencode($domain) . '&limit=' . $limit;
+            if ($sendEmail) $redirectUrl .= '&email=1';
+
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
     }
 }
 
 // Handle the actual crawling (from redirect)
 if (isset($_GET['analyze']) && $_GET['analyze'] === '1' && !empty($_GET['domain'])) {
-    $domain = filter_var(trim($_GET['domain']), FILTER_SANITIZE_URL);
-    $sendEmail = isset($_GET['email']);
-    $limit = isset($_GET['limit']) ? max(1, min(1000, intval($_GET['limit']))) : 500;
-    
-    if ($domain) {
+    $domain = trim($_GET['domain']);
+
+    // Re-validate URL for security (in case user modified GET params)
+    $validation = validateUrl($domain);
+
+    if (!$validation['valid']) {
+        $errorMessage = 'Invalid domain: ' . htmlspecialchars($validation['error']);
+    } else {
+        $domain = $validation['url'];
+        $sendEmail = isset($_GET['email']);
+        $limit = isset($_GET['limit']) ? max(1, min(1000, intval($_GET['limit']))) : 500;
         $crawled = true;
         
         // Show immediate loading status
@@ -569,11 +700,15 @@ if (isset($_GET['analyze']) && $_GET['analyze'] === '1' && !empty($_GET['domain'
             $headers .= "From: SEO Meta Tool <YOUR-EMAIL@example.com>\r\n";
             $headers .= "Reply-To: YOUR-EMAIL@example.com\r\n";
             $headers .= "X-Mailer: PHP/" . phpversion() . "\r\n";
-            
-            $subject = empty($results) ? 
-                'SEO Report for ' . $domain . ' - No Issues Found' :
-                'SEO Report for ' . $domain . ' - ' . count($results) . ' Issues Found';
-            
+
+            // Sanitize domain for email subject to prevent email header injection
+            $safeDomain = preg_replace('/[\r\n\t]/', '', $domain);
+            $safeDomain = substr($safeDomain, 0, 100); // Limit length
+
+            $subject = empty($results) ?
+                'SEO Report for ' . $safeDomain . ' - No Issues Found' :
+                'SEO Report for ' . $safeDomain . ' - ' . count($results) . ' Issues Found';
+
             if (mail('YOUR-EMAIL@example.com', $subject, $emailBody, $headers)) {
                 $emailSent = true;
             }
@@ -854,9 +989,15 @@ function generateEmailReport($results, $domain, $totalCrawled, $executionTime, $
             
             <div class="content">
                 <div id="crawl-form" <?php echo $crawled ? 'style="display:none;"' : ''; ?>>
+                <?php if (!empty($errorMessage)): ?>
+                <div class="alert alert-danger" role="alert">
+                    <strong>Error:</strong> <?php echo $errorMessage; ?>
+                </div>
+                <?php endif; ?>
                 <form method="post" action="">
                     <input type="hidden" name="action" value="crawl">
-                    
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+
                     <div class="form-group">
                         <label for="domain">Website Domain</label>
                         <input type="text" 
