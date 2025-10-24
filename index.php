@@ -1,13 +1,130 @@
 <?php
-// SEO Meta Checker Tool
-// Powered by Ebizindia - https://www.ebizindia.com
+/**
+ * SEO Meta Checker Tool
+ * Powered by Ebizindia - https://www.ebizindia.com
+ *
+ * @version 2.0
+ * @license MIT
+ */
+
+// Security headers
+header('X-Frame-Options: DENY');
+header('X-Content-Type-Options: nosniff');
+header('X-XSS-Protection: 1; mode=block');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://code.jquery.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net;");
+
+// Load configuration
+if (file_exists(__DIR__ . '/config.php')) {
+    require_once __DIR__ . '/config.php';
+} else {
+    // Use default configuration if config.php doesn't exist
+    define('ADMIN_EMAIL', 'your-email@example.com');
+    define('FROM_EMAIL', 'seo-tool@example.com');
+    define('FROM_NAME', 'SEO Meta Tool');
+    define('MAX_PAGES_DEFAULT', 500);
+    define('MAX_PAGES_LIMIT', 1000);
+    define('CRAWL_TIMEOUT', 8);
+    define('CRAWL_BATCH_SIZE', 10);
+    define('MAX_EXECUTION_TIME', 600);
+    define('MEMORY_LIMIT', '256M');
+    define('ENABLE_RATE_LIMITING', true);
+    define('MAX_REQUESTS_PER_HOUR', 5);
+    define('SESSION_LIFETIME', 3600);
+    define('SESSION_NAME', 'SEO_CHECKER_SESSION');
+}
 
 // Increase PHP execution time limits
-ini_set('max_execution_time', 600); // 10 minutes
-set_time_limit(600); // 10 minutes - alternative method
-ini_set('memory_limit', '256M'); // Increase memory limit too
+ini_set('max_execution_time', MAX_EXECUTION_TIME);
+set_time_limit(MAX_EXECUTION_TIME);
+ini_set('memory_limit', MEMORY_LIMIT);
 
+// Secure session configuration
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', 1); // Use only over HTTPS
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.gc_maxlifetime', SESSION_LIFETIME);
+
+session_name(SESSION_NAME);
 session_start();
+
+/**
+ * Generate CSRF token
+ * @return string
+ */
+function generateCSRFToken() {
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/**
+ * Validate CSRF token
+ * @param string $token
+ * @return bool
+ */
+function validateCSRFToken($token) {
+    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+}
+
+/**
+ * Validate URL format
+ * @param string $url
+ * @return bool
+ */
+function validateURL($url) {
+    // Basic URL validation
+    $url = filter_var($url, FILTER_VALIDATE_URL);
+    if ($url === false) {
+        return false;
+    }
+
+    // Check for valid scheme
+    $scheme = parse_url($url, PHP_URL_SCHEME);
+    if (!in_array($scheme, ['http', 'https'])) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Rate limiting check
+ * @return bool
+ */
+function checkRateLimit() {
+    if (!defined('ENABLE_RATE_LIMITING') || !ENABLE_RATE_LIMITING) {
+        return true;
+    }
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $key = 'rate_limit_' . md5($ip);
+
+    if (!isset($_SESSION[$key])) {
+        $_SESSION[$key] = ['count' => 0, 'reset_time' => time() + 3600];
+    }
+
+    // Reset counter if hour has passed
+    if (time() > $_SESSION[$key]['reset_time']) {
+        $_SESSION[$key] = ['count' => 0, 'reset_time' => time() + 3600];
+    }
+
+    $_SESSION[$key]['count']++;
+
+    return $_SESSION[$key]['count'] <= MAX_REQUESTS_PER_HOUR;
+}
+
+/**
+ * Sanitize domain for email
+ * @param string $domain
+ * @return string
+ */
+function sanitizeDomainForEmail($domain) {
+    // Remove any characters that could be used for email header injection
+    return preg_replace('/[^\w\.\-:\/]/', '', $domain);
+}
 
 class SEOCrawler {
     private $visited = []; // Hash map for O(1) lookups
@@ -134,8 +251,9 @@ class SEOCrawler {
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_TIMEOUT => $this->timeout,
-                CURLOPT_USERAGENT => ' SEO Crawler 2.0 (Optimized)',
-                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; SEO-Crawler/2.0; +https://github.com/seo-tools)',
+                CURLOPT_SSL_VERIFYPEER => true, // Enable SSL verification for security
+                CURLOPT_SSL_VERIFYHOST => 2,     // Verify SSL certificate hostname
                 CURLOPT_MAXREDIRS => 3,
                 CURLOPT_CONNECTTIMEOUT => 5,
             ]);
@@ -181,8 +299,9 @@ class SEOCrawler {
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => $this->timeout,
-            CURLOPT_USERAGENT => ' SEO Crawler 1.0',
-            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; SEO-Crawler/2.0; +https://github.com/seo-tools)',
+            CURLOPT_SSL_VERIFYPEER => true,  // Enable SSL verification for security
+            CURLOPT_SSL_VERIFYHOST => 2,     // Verify SSL certificate hostname
             CURLOPT_MAXREDIRS => 3,
         ]);
         
@@ -508,35 +627,58 @@ class SEOCrawler {
 $results = [];
 $crawled = false;
 $emailSent = false;
+$error = null;
 
-if ($_POST['action'] === 'crawl' && !empty($_POST['domain'])) {
-    $domain = filter_var(trim($_POST['domain']), FILTER_SANITIZE_URL);
-    $sendEmail = isset($_POST['send_email']);
-    
-    // Check for limit parameter
-    $limit = 500; // default
-    if (isset($_GET['limit']) && is_numeric($_GET['limit'])) {
-        $limit = max(1, min(1000, intval($_GET['limit']))); // Between 1 and 1000
+if (isset($_POST['action']) && $_POST['action'] === 'crawl' && !empty($_POST['domain'])) {
+    // Validate CSRF token
+    if (!isset($_POST['csrf_token']) || !validateCSRFToken($_POST['csrf_token'])) {
+        $error = 'Invalid security token. Please refresh the page and try again.';
     }
-    
-    if ($domain) {
-        // Redirect after POST to prevent resubmission on refresh
-        $redirectUrl = $_SERVER['PHP_SELF'] . '?analyze=1&domain=' . urlencode($domain) . '&limit=' . $limit;
-        if ($sendEmail) $redirectUrl .= '&email=1';
-        if (isset($_GET['limit'])) $redirectUrl .= '&limit=' . $limit;
-        
-        header('Location: ' . $redirectUrl);
-        exit;
+    // Check rate limiting
+    elseif (!checkRateLimit()) {
+        $error = 'Rate limit exceeded. Please wait before submitting another request.';
+    }
+    else {
+        $domain = trim($_POST['domain']);
+
+        // Add protocol if missing
+        if (!preg_match('/^https?:\/\//', $domain)) {
+            $domain = 'https://' . $domain;
+        }
+
+        // Validate URL format
+        if (!validateURL($domain)) {
+            $error = 'Invalid URL format. Please enter a valid domain (e.g., example.com or https://example.com)';
+        } else {
+            $sendEmail = isset($_POST['send_email']);
+
+            // Check for limit parameter
+            $limit = MAX_PAGES_DEFAULT; // default
+            if (isset($_GET['limit']) && is_numeric($_GET['limit'])) {
+                $limit = max(1, min(MAX_PAGES_LIMIT, intval($_GET['limit']))); // Between 1 and max limit
+            }
+
+            // Redirect after POST to prevent resubmission on refresh
+            $redirectUrl = $_SERVER['PHP_SELF'] . '?analyze=1&domain=' . urlencode($domain) . '&limit=' . $limit;
+            if ($sendEmail) $redirectUrl .= '&email=1';
+
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
     }
 }
 
 // Handle the actual crawling (from redirect)
 if (isset($_GET['analyze']) && $_GET['analyze'] === '1' && !empty($_GET['domain'])) {
-    $domain = filter_var(trim($_GET['domain']), FILTER_SANITIZE_URL);
-    $sendEmail = isset($_GET['email']);
-    $limit = isset($_GET['limit']) ? max(1, min(1000, intval($_GET['limit']))) : 500;
-    
-    if ($domain) {
+    $domain = trim($_GET['domain']);
+
+    // Validate URL format
+    if (!validateURL($domain)) {
+        $error = 'Invalid URL format. Please enter a valid domain.';
+    } else {
+        $sendEmail = isset($_GET['email']);
+        $limit = isset($_GET['limit']) ? max(1, min(MAX_PAGES_LIMIT, intval($_GET['limit']))) : MAX_PAGES_DEFAULT;
+
         $crawled = true;
         
         // Show immediate loading status
@@ -562,19 +704,23 @@ if (isset($_GET['analyze']) && $_GET['analyze'] === '1' && !empty($_GET['domain'
         echo "<script>document.getElementById('crawling-status').style.display='none';</script>";
         
         // Send email if requested
-        if ($sendEmail) {
+        if ($sendEmail && defined('ADMIN_EMAIL') && ADMIN_EMAIL !== 'your-email@example.com') {
             $emailBody = generateEmailReport($results, $domain, $totalCrawled, $executionTime, $performanceStats);
+
+            // Sanitize domain for use in email subject to prevent header injection
+            $safeDomain = sanitizeDomainForEmail($domain);
+
             $headers = "MIME-Version: 1.0\r\n";
             $headers .= "Content-type: text/html; charset=UTF-8\r\n";
-            $headers .= "From: SEO Meta Tool <YOUR-EMAIL@example.com>\r\n";
-            $headers .= "Reply-To: YOUR-EMAIL@example.com\r\n";
+            $headers .= "From: " . FROM_NAME . " <" . FROM_EMAIL . ">\r\n";
+            $headers .= "Reply-To: " . FROM_EMAIL . "\r\n";
             $headers .= "X-Mailer: PHP/" . phpversion() . "\r\n";
-            
-            $subject = empty($results) ? 
-                'SEO Report for ' . $domain . ' - No Issues Found' :
-                'SEO Report for ' . $domain . ' - ' . count($results) . ' Issues Found';
-            
-            if (mail('YOUR-EMAIL@example.com', $subject, $emailBody, $headers)) {
+
+            $subject = empty($results) ?
+                'SEO Report for ' . $safeDomain . ' - No Issues Found' :
+                'SEO Report for ' . $safeDomain . ' - ' . count($results) . ' Issues Found';
+
+            if (mail(ADMIN_EMAIL, $subject, $emailBody, $headers)) {
                 $emailSent = true;
             }
         }
@@ -853,9 +999,16 @@ function generateEmailReport($results, $domain, $totalCrawled, $executionTime, $
             </div>
             
             <div class="content">
+                <?php if ($error): ?>
+                <div class="alert alert-danger">
+                    <strong>Error:</strong> <?php echo htmlspecialchars($error); ?>
+                </div>
+                <?php endif; ?>
+
                 <div id="crawl-form" <?php echo $crawled ? 'style="display:none;"' : ''; ?>>
                 <form method="post" action="">
                     <input type="hidden" name="action" value="crawl">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(generateCSRFToken()); ?>">
                     
                     <div class="form-group">
                         <label for="domain">Website Domain</label>
@@ -872,16 +1025,18 @@ function generateEmailReport($results, $domain, $totalCrawled, $executionTime, $
                         </small>
                     </div>
                     
+                    <?php if (defined('ADMIN_EMAIL') && ADMIN_EMAIL !== 'your-email@example.com'): ?>
                     <div class="form-check mb-3">
-                        <input type="checkbox" 
-                               class="form-check-input" 
-                               id="send_email" 
-                               name="send_email" 
+                        <input type="checkbox"
+                               class="form-check-input"
+                               id="send_email"
+                               name="send_email"
                                <?php echo (!isset($_GET['email']) || $_GET['email']) ? 'checked' : ''; ?>>
                         <label class="form-check-label" for="send_email">
-                            Email report to YOUR-EMAIL@example.com
+                            Email report to <?php echo htmlspecialchars(ADMIN_EMAIL); ?>
                         </label>
                     </div>
+                    <?php endif; ?>
                     
                     <button type="submit" class="btn btn-primary btn-lg">
                         <i class="fas fa-search"></i> Start SEO Analysis
@@ -900,11 +1055,11 @@ function generateEmailReport($results, $domain, $totalCrawled, $executionTime, $
                     
                     <?php if ($emailSent): ?>
                     <div class="success-message">
-                        <strong>Success!</strong> Report has been emailed to YOUR-EMAIL@example.com
+                        <strong>Success!</strong> Report has been emailed to <?php echo htmlspecialchars(ADMIN_EMAIL); ?>
                     </div>
                     <?php elseif (isset($_GET['email']) && !$emailSent): ?>
                     <div class="alert alert-warning">
-                        <strong>Email Issue:</strong> Could not send email. Please check your email settings.
+                        <strong>Email Issue:</strong> Could not send email. Please check your email configuration in config.php.
                     </div>
                     <?php endif; ?>
                     

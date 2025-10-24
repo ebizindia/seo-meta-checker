@@ -1,10 +1,62 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
+
+    # Force HTTPS (uncomment if you have SSL certificate)
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^.*$ index.php [L]
 </IfModule>
 
+# Security headers (some are also set in PHP, these are fallback)
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header always set X-Frame-Options "DENY"
+
+    # Prevent MIME type sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # Enable XSS protection
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Remove X-Powered-By header
+    Header unset X-Powered-By
+
+    # HSTS - Strict Transport Security (uncomment if using HTTPS)
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+# Disable directory browsing
 Options -Indexes
+
+# Default charset
 AddDefaultCharset UTF-8
+
+# Protect configuration files
+<FilesMatch "^(config\.php|\.env|composer\.(json|lock))$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Protect sensitive files
+<FilesMatch "\.(log|cache|tmp)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Disable PHP execution in uploads directory if you add one
+# <Directory "uploads">
+#     php_flag engine off
+# </Directory>
+
+# Limit request methods
+<LimitExcept GET POST HEAD>
+    Order allow,deny
+    Deny from all
+</LimitExcept>

@@ -82,33 +82,36 @@ chmod 644 index.php
 
 ### 4. Configure the Tool (REQUIRED)
 
-**Before first use, you MUST configure the tool by editing `index.php`.**
+**Before first use, you MUST configure the tool.**
 
-Open `index.php` and update the configuration section at the top (around lines 5-30):
+1. Copy the example configuration file:
+   ```bash
+   cp config.example.php config.php
+   ```
 
-```php
-// Email Configuration
-define('REPORT_EMAIL', 'your-email@example.com');  // YOUR email address
-define('REPORT_FROM_EMAIL', 'noreply@yourdomain.com');  // FROM email address
-define('REPORT_FROM_NAME', 'SEO Meta Tool');  // Display name
+2. Edit `config.php` and update with your settings:
+   ```php
+   // Email Configuration
+   define('ADMIN_EMAIL', 'your-email@yourdomain.com');
+   define('FROM_EMAIL', 'seo-tool@yourdomain.com');
+   define('FROM_NAME', 'SEO Meta Tool');
 
-// Crawler Settings (adjust as needed)
-define('DEFAULT_MAX_PAGES', 500);  // Default pages to crawl
-define('MAX_PAGES_LIMIT', 1000);   // Maximum allowed pages
-define('REQUEST_TIMEOUT', 8);      // Request timeout in seconds
-define('BATCH_SIZE', 10);          // Concurrent requests
-```
+   // Application Configuration
+   define('MAX_PAGES_DEFAULT', 500);
+   define('MAX_PAGES_LIMIT', 1000);
+   define('CRAWL_TIMEOUT', 8);
+   define('CRAWL_BATCH_SIZE', 10);
 
-**See [CONFIGURATION.md](CONFIGURATION.md) for detailed configuration instructions and all the code changes needed.**
+   // Security Configuration
+   define('ENABLE_RATE_LIMITING', true);
+   define('MAX_REQUESTS_PER_HOUR', 5);
+   ```
 
-### 5. Configure Email (Optional - Alternative Method)
+3. Ensure `config.php` is protected:
+   - Already included in `.gitignore`
+   - Protected by `.htaccess` rules
 
-If you want to use the email reporting feature, update the email address in `index.php`:
-
-```php
-// Line ~370
-if (mail('your-email@example.com', $subject, $emailBody, $headers)) {
-```
+**See [CONFIGURATION.md](CONFIGURATION.md) for detailed configuration instructions.**
 
 ## Usage
 
@@ -218,16 +221,29 @@ Performance factors:
 - Consider using PHPMailer for SMTP support
 
 **SSL/Certificate errors**
-- The tool has `CURLOPT_SSL_VERIFYPEER => false` for flexibility
-- For production, consider enabling SSL verification
+- SSL certificate verification is now ENABLED by default for security
+- Ensure your server has up-to-date CA certificates
+- Update cURL CA bundle if needed: `curl.cainfo` in php.ini
 
-## Security Considerations
+## Security Features (Version 2.0)
 
-- Input sanitization using `filter_var()` with `FILTER_SANITIZE_URL`
-- Protection against infinite loops with max page limits
-- Timeout protection to prevent hung processes
-- Domain validation to prevent SSRF attacks
-- POST/Redirect/GET pattern to prevent form resubmission
+This tool implements comprehensive security measures:
+
+### Core Security Features
+- ✅ **SSL Certificate Verification** - All HTTPS connections are verified
+- ✅ **CSRF Protection** - Token-based form protection
+- ✅ **Session Security** - HTTPOnly, Secure, SameSite cookies
+- ✅ **Rate Limiting** - Prevents abuse (configurable)
+- ✅ **Input Validation** - Strict URL validation and sanitization
+- ✅ **Security Headers** - X-Frame-Options, CSP, XSS Protection, etc.
+- ✅ **Email Injection Prevention** - Sanitized email headers
+- ✅ **Configuration Protection** - Sensitive files blocked via .htaccess
+
+### Security Best Practices
+- Use HTTPS in production (enable HTTPS redirect in `.htaccess`)
+- Keep PHP and dependencies updated
+- Monitor logs for suspicious activity
+- Review `SECURITY.md` for detailed security information
 
 ## Browser Compatibility
 
